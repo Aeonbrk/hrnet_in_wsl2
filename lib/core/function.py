@@ -103,12 +103,12 @@ def validate(config, val_loader, val_dataset, model, criterion, output_dir,
     # switch to evaluate mode
     model.eval()
 
-    num_samples = len(val_dataset)
+    num_samples = len(val_dataset) # 6352
     all_preds = np.zeros(
         (num_samples, config.MODEL.NUM_JOINTS, 3),
         dtype=np.float32
-    )
-    all_boxes = np.zeros((num_samples, 6))
+    ) # [6325,17,3]
+    all_boxes = np.zeros((num_samples, 6)) # [6325,6]
     image_path = []
     filenames = []
     imgnums = []
@@ -116,7 +116,13 @@ def validate(config, val_loader, val_dataset, model, criterion, output_dir,
     with torch.no_grad():
         end = time.time()
         for i, (input, target, target_weight, meta) in enumerate(val_loader):
+            # input --> [64,3,256,192] --> device==cpu
+            # target --> [64,17,64,48] --> device==cpu
+            # meta --> include: image,filename,imgnm,joints,joints_vis,center,scale,rotation,score
+            # target_weight --> [64,17,1] 
+            
             # compute output
+            # outputs --> [64,17,64,48]
             outputs = model(input)
             if isinstance(outputs, list):
                 output = outputs[-1]
@@ -126,10 +132,11 @@ def validate(config, val_loader, val_dataset, model, criterion, output_dir,
             if config.TEST.FLIP_TEST:
                 # this part is ugly, because pytorch has not supported negative index
                 # input_flipped = model(input[:, :, :, ::-1])
-                input_flipped = np.flip(input.cpu().numpy(), 3).copy()
+                input_flipped = np.flip(input.cpu().numpy(), 3).copy() 
                 input_flipped = torch.from_numpy(input_flipped).cuda()
+                # [64,3,256,192]
                 outputs_flipped = model(input_flipped)
-
+                # outputs_flipped --> [64,17,64,48]
                 if isinstance(outputs_flipped, list):
                     output_flipped = outputs_flipped[-1]
                 else:
@@ -138,7 +145,7 @@ def validate(config, val_loader, val_dataset, model, criterion, output_dir,
                 output_flipped = flip_back(output_flipped.cpu().numpy(),
                                            val_dataset.flip_pairs)
                 output_flipped = torch.from_numpy(output_flipped.copy()).cuda()
-
+                # [64,17,64,48]
 
                 # feature is not aligned, shift flipped heatmap for higher accuracy
                 if config.TEST.SHIFT_HEATMAP:
@@ -146,7 +153,8 @@ def validate(config, val_loader, val_dataset, model, criterion, output_dir,
                         output_flipped.clone()[:, :, :, 0:-1]
 
                 output = (output + output_flipped) * 0.5
-
+                # [64,17,64,48]
+                
             target = target.cuda(non_blocking=True)
             target_weight = target_weight.cuda(non_blocking=True)
 

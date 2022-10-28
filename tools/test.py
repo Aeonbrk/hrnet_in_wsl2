@@ -110,6 +110,13 @@ def main():
     # The source is a string representing a code object as returned by compile().
     # compile():将source编译为可以通过exec()或eval()执行的code对象。
 
+    # model的eval方法主要是针对某些在train和predict两个阶段会有不同参数的层。
+    # 比如Dropout层和BN层Dropout在train时随机选择神经元而predict要使用全部神经元并且要乘一个补偿系数
+    # BN在train时每个batch做了不同的归一化因此也对应了不同的参数，相应predict时实际用的参数是每个batch下参数的移动平均。
+    # torch为了方便大家，设计这个eval方法就是让我们可以不用手动去针对这些层做predict阶段的处理
+    # (也可以叫evaluation阶段,所以这个方法名才是eval)这也就是说，如果模型中用了dropout或bn，那么predict时必须使用eval
+    # 否则结果是没有参考价值的，不存在选择的余地。
+
     if cfg.TEST.MODEL_FILE:
         logger.info('=> loading model from {}'.format(cfg.TEST.MODEL_FILE))
         model.load_state_dict(torch.load(cfg.TEST.MODEL_FILE), strict=False)
@@ -120,9 +127,10 @@ def main():
         # TEST.MODEL_FILE models/pytorch/pose_coco/pose_hrnet_w32_256x192.pth
 
     else:
-        model_state_file = os.path.join(
-            final_output_dir, 'final_state.pth'
-        )
+        # model_state_file = os.path.join(
+        #     final_output_dir, 'final_state.pth'
+        # )
+        model_state_file = 'models/pytorch/pose_coco/pose_hrnet_w32_256x192.pth'
         logger.info('=> loading model from {}'.format(model_state_file))
         model.load_state_dict(torch.load(model_state_file))
 
