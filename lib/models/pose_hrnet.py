@@ -403,6 +403,8 @@ class PoseHighResolutionNet(nn.Module):
         self.layer1 = self._make_layer(Bottleneck, 64, 4)
         # output-->256 channels
 
+
+        # stage 2
         self.stage2_cfg = cfg['MODEL']['EXTRA']['STAGE2']
         num_channels = self.stage2_cfg['NUM_CHANNELS']
         # [32,64]
@@ -415,7 +417,23 @@ class PoseHighResolutionNet(nn.Module):
         self.stage2, pre_stage_channels = self._make_stage(
             self.stage2_cfg, num_channels)
 
+
+        # stage3
         self.stage3_cfg = cfg['MODEL']['EXTRA']['STAGE3']
+        
+        # NUM_MODULES: 4
+        # NUM_BRANCHES: 3
+        # BLOCK: BASIC
+        # NUM_BLOCKS:
+        # - 4
+        # - 4
+        # - 4
+        # NUM_CHANNELS:
+        # - 32
+        # - 64
+        # - 128
+        # FUSE_METHOD: SUM
+        
         num_channels = self.stage3_cfg['NUM_CHANNELS']
         # [32,64,128]
         block = blocks_dict[self.stage3_cfg['BLOCK']]
@@ -428,6 +446,8 @@ class PoseHighResolutionNet(nn.Module):
         self.stage3, pre_stage_channels = self._make_stage(
             self.stage3_cfg, num_channels)
 
+
+        # stage4
         self.stage4_cfg = cfg['MODEL']['EXTRA']['STAGE4']
         num_channels = self.stage4_cfg['NUM_CHANNELS']
         # [32,64,128,256]

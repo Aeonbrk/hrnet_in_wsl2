@@ -252,11 +252,11 @@ class JointsDataset(Dataset):
 
             for joint_id in range(self.num_joints):
                 feat_stride = self.image_size / self.heatmap_size
-                mu_x = int(joints[joint_id][0] / feat_stride[0] + 0.5)
-                mu_y = int(joints[joint_id][1] / feat_stride[1] + 0.5)
+                mu_x = int(joints[joint_id][0] / feat_stride[0] + 0.5) 
+                mu_y = int(joints[joint_id][1] / feat_stride[1] + 0.5) 
                 # Check that any part of the gaussian is in-bounds
-                ul = [int(mu_x - tmp_size), int(mu_y - tmp_size)]
-                br = [int(mu_x + tmp_size + 1), int(mu_y + tmp_size + 1)]
+                ul = [int(mu_x - tmp_size), int(mu_y - tmp_size)] # 左上角
+                br = [int(mu_x + tmp_size + 1), int(mu_y + tmp_size + 1)] # 右上角
                 if ul[0] >= self.heatmap_size[0] or ul[1] >= self.heatmap_size[1] \
                         or br[0] < 0 or br[1] < 0:
                     # If not, just return the image as is
