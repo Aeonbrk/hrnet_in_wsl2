@@ -89,6 +89,7 @@ class JointsDataset(Dataset):
         :param joints: 关键点位置,shape=[17,3], 因为使用2D表示,第三维度都为0
         :param joints_vis: 表示关键点是否可见,shape=[17,3]
         :return:
+        数据增强的时候使用，也就是说，并不是所有的数据都是全身的关节，为了增强模型的鲁棒性，也应当适当加一些半身的图像进行训练。
         """
         # 上半部分关节
         upper_joints = []
@@ -106,7 +107,7 @@ class JointsDataset(Dataset):
                 else:
                     lower_joints.append(joints[joint_id])
 
-        # 二分之一的概率进行关键点选择,选择上半身或者下半身关键点
+        # 二分之一的概率选择上半身或者下半身关键点
         if np.random.randn() < 0.5 and len(upper_joints) > 2:
             selected_joints = upper_joints
         else:
@@ -117,10 +118,10 @@ class JointsDataset(Dataset):
         if len(selected_joints) < 2:
             return None, None
 
-        #
+        # 调整数据类型转换成 numpy.array
         selected_joints = np.array(selected_joints, dtype=np.float32)
 
-        # 求得关键点x,y的平均坐标
+        # 求得关键点x,y的平均坐标，即中心坐标
         center = selected_joints.mean(axis=0)[:2]
 
         # 左上角坐标
@@ -128,7 +129,7 @@ class JointsDataset(Dataset):
         # 右下角坐标
         right_bottom = np.amax(selected_joints, axis=0)
 
-        # 获得饱览所有关键点的最小宽和高
+        # 获得包揽所有关键点的最小宽和高
         w = right_bottom[0] - left_top[0]
         h = right_bottom[1] - left_top[1]
 
@@ -148,7 +149,7 @@ class JointsDataset(Dataset):
             dtype=np.float32
         )
 
-
+        # 适当放大避免剪裁到人
         scale = scale * 1.5
 
         return center, scale
@@ -197,13 +198,13 @@ class JointsDataset(Dataset):
         c = db_rec['center']
         s = db_rec['scale']
 
-        # 如果训练样本中没有设置score,则加载该属性,并且设置为1
+        # 如果训练样本中有设置score,则加载该属性,否则score设置为1
         score = db_rec['score'] if 'score' in db_rec else 1
         r = 0
 
         # 如果是进行训练,
         if self.is_train:
-            # 如果可见关键点大于人体一半关键点, 并且生成的随机数小于self.prob_half_body=0.3
+            # 如果可见关键点大于人体一半关键点, 并且生成的随机数小于 self.prob_half_body=0.3(也就是是否要用半身的概率)
             if (np.sum(joints_vis[:, 0]) > self.num_joints_half_body and np.random.rand() < self.prob_half_body):
                 # 重新调整center,scale
                 c_half_body, s_half_body = self.half_body_transform(joints, joints_vis)
@@ -218,20 +219,20 @@ class JointsDataset(Dataset):
             # s大小为[1-0.35=0.65,1+0.35=1.35]之间
             s = s * np.clip(np.random.randn()*sf + 1, 1 - sf, 1 + sf)
 
-            # r大小为[-2*45=95,2*45=90]之间
+            # r大小为[-2*45=-90,2*45=90]之间，且仍然是概率选取
             r = np.clip(np.random.randn()*rf, -rf*2, rf*2) \
                 if random.random() <= 0.6 else 0
 
             # 进行数据水平翻转
             if self.flip and random.random() <= 0.5:
-                data_numpy = data_numpy[:, ::-1, :]
+                data_numpy = data_numpy[:, ::-1, :] #原图像的w方向翻转
                 joints, joints_vis = fliplr_joints(
-                    joints, joints_vis, data_numpy.shape[1], self.flip_pairs)
+                    joints, joints_vis, data_numpy.shape[1], self.flip_pairs) # 把标注坐标进行翻转
                 c[0] = data_numpy.shape[1] - c[0] - 1
 
         # 进行反射变换,样本数据关键点发生角度旋转之后,每个像素也旋转到对应位置.
         # 获得旋转矩阵
-        trans = get_affine_transform(c, s, r, self.image_size)
+        trans = get_affine_transform(c, s, r, self.image_size) # 把原bbox先缩放到image_size，再按box中心旋转r°
         # 根据旋转矩阵进行反射变换
         input = cv2.warpAffine(
             data_numpy,
@@ -244,7 +245,7 @@ class JointsDataset(Dataset):
         if self.transform:
             input = self.transform(input)
 
-        # 对人体关键点也进行反射变换
+        # 对人体关键点标注也进行反射变换
         for i in range(self.num_joints):
             if joints_vis[i, 0] > 0.0:
                 joints[i, 0:2] = affine_transform(joints[i, 0:2], trans)

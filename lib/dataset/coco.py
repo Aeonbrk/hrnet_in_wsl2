@@ -53,17 +53,17 @@ class COCODataset(JointsDataset):
     '''
     def __init__(self, cfg, root, image_set, is_train, transform=None):
         super().__init__(cfg, root, image_set, is_train, transform)
-        # nms 阈值,默认为1
+        # nms 阈值,默认为1 Non-Maximum Suppression (NMS)
         self.nms_thre = cfg.TEST.NMS_THRE
         # 默认设置为0
         self.image_thre = cfg.TEST.IMAGE_THRE
         # 是否使用软nms,默认false
         self.soft_nms = cfg.TEST.SOFT_NMS
-        # oks 阈值
+        # oks 阈值 Object Keypoint Similarity (OKS)
         self.oks_thre = cfg.TEST.OKS_THRE
         # ==默认为0.2
         self.in_vis_thre = cfg.TEST.IN_VIS_THRE
-        # box文件,该文件主要记录person的box
+        # bbox文件,该文件主要记录person的box
         self.bbox_file = cfg.TEST.COCO_BBOX_FILE
         # 是否使用ground truch
         self.use_gt_bbox = cfg.TEST.USE_GT_BBOX
@@ -108,7 +108,7 @@ class COCODataset(JointsDataset):
 
         # 需要检测关键点的数目
         self.num_joints = 17
-        # 人体水平对称关键印射
+        # 人体水平对称关键点映射 left and right
         self.flip_pairs = [[1, 2], [3, 4], [5, 6], [7, 8],
                            [9, 10], [11, 12], [13, 14], [15, 16]]
         # ?? 父母ids
@@ -118,7 +118,7 @@ class COCODataset(JointsDataset):
         self.upper_body_ids = (0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10)
         self.lower_body_ids = (11, 12, 13, 14, 15, 16)
 
-        # 分别定义每个关键点的权重
+        # 分别定义每个关键点的权重 ---> 为什么需要定于权重???
         self.joints_weight = np.array(
             [
                 1., 1., 1., 1., 1., 1., 1., 1.2, 1.2,
@@ -151,7 +151,7 @@ class COCODataset(JointsDataset):
         return image_ids
 
     def _get_db(self):
-        # 如果是进行训练或者设置self.use_gt_bbo==Ture
+        # 如果是进行训练或者设置self.use_gt_bbox==Ture
         if self.is_train or self.use_gt_bbox:
             # use ground truth bbox
             gt_db = self._load_coco_keypoint_annotations()
@@ -178,7 +178,7 @@ class COCODataset(JointsDataset):
             crowd instances are handled by marking their overlaps with all categories to -1
             and later excluded in training
         bbox:
-            [x1, y1, w, h]
+            [x1, y1, w, h] 中心点以及高宽
         :param index: coco image id
         :return: db entry
         """
@@ -219,13 +219,33 @@ class COCODataset(JointsDataset):
             if max(obj['keypoints']) == 0:
                 continue
 
-            # 获取人体的关节信息,使用3维表示
+            """annotation
+            {
+                "segmentation": [[125.12,539.69,140.94,522.43...]],
+                "num_keypoints": 10,
+                "area": 47803.27955,
+                "iscrowd": 0,
+                "keypoints": [0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,142,309,1,177,320,2,191,398...],
+                "image_id": 425226,"bbox": [73.35,206.02,300.58,372.5],"category_id": 1,
+                "id": 183126
+            }
+            
+            obj就是上面的annotation 多了个clean_box(对box进行简单的清理,清除一些不符合逻辑的box)
+            "keypoints": [0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,142,309,1,177,320,2,191,398...]
+            0 - 50 --> 总共51个点 51 / 3 = 17 也就是每个 keypoint 有三个维度的信息 ,
+            Each keypoint is annotated with three numbers`(x,y,v)`, 
+            where x and y mark the coordinates, and v indicates if the keypoint is 
+            visible.
+            获取人体的关节信息,使用3维表示
+            """
             joints_3d = np.zeros((self.num_joints, 3), dtype=np.float)
             joints_3d_vis = np.zeros((self.num_joints, 3), dtype=np.float)
             for ipt in range(self.num_joints):
                 joints_3d[ipt, 0] = obj['keypoints'][ipt * 3 + 0]
                 joints_3d[ipt, 1] = obj['keypoints'][ipt * 3 + 1]
                 joints_3d[ipt, 2] = 0
+                # 三种visibility，v=0: 未标记，v =1: 标记但不可见，v =2: 标记且可见
+                # 只用 1 和 0
                 t_vis = obj['keypoints'][ipt * 3 + 2]
                 if t_vis > 1:
                     t_vis = 1
@@ -253,6 +273,7 @@ class COCODataset(JointsDataset):
         x, y, w, h = box[:4]
         return self._xywh2cs(x, y, w, h)
 
+    # 对 bbox 的处理
     def _xywh2cs(self, x, y, w, h):
         center = np.zeros((2), dtype=np.float32)
         center[0] = x + w * 0.5
@@ -361,6 +382,7 @@ class COCODataset(JointsDataset):
             kpts[kpt['image']].append(kpt)
 
         # rescoring and oks nms
+        # 开算这些评价指标
         num_joints = self.num_joints
         in_vis_thre = self.in_vis_thre
         oks_thre = self.oks_thre

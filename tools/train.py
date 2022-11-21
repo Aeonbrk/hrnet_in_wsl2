@@ -37,36 +37,53 @@ import dataset
 import models
 
 
+"""
+1.解析参数
+2.构建网络模型
+3.加载训练测试数据集迭代器
+4.迭代训练
+5.模型评估保存
+"""
+
 def parse_args():
     parser = argparse.ArgumentParser(description='Train keypoints network')
-    # general
+    # general,指定yaml文件的路径
     parser.add_argument('--cfg',
                         help='experiment configure file name',
                         required=True,
                         type=str)
 
+    # 暂时没有具体实现
     parser.add_argument('opts',
                         help="Modify config options using the command-line",
                         default=None,
                         nargs=argparse.REMAINDER)
 
     # philly
+    # 模型的目录
     parser.add_argument('--modelDir',
                         help='model directory',
                         type=str,
                         default='')
+
+    # 输出log的目录
     parser.add_argument('--logDir',
                         help='log directory',
                         type=str,
                         default='')
+
+    # 训练数据的目录
     parser.add_argument('--dataDir',
                         help='data directory',
                         type=str,
                         default='')
+
+    # 预训练模型的目录
     parser.add_argument('--prevModelDir',
                         help='prev Model directory',
                         type=str,
                         default='')
+
 
     args = parser.parse_args()
 
@@ -74,55 +91,72 @@ def parse_args():
 
 
 def main():
+    # 对输入参数进行解析
     args = parse_args()
+    # 根据输入参数对cfg进行更新
     update_config(cfg, args)
 
+    # 创建logger,用于记录训练过程的打印信息
     logger, final_output_dir, tb_log_dir = create_logger(
         cfg, args.cfg, 'train')
 
     logger.info(pprint.pformat(args))
     logger.info(cfg)
 
+
     # cudnn related setting
+    # 使用GPU的一些相关设置
     cudnn.benchmark = cfg.CUDNN.BENCHMARK
     torch.backends.cudnn.deterministic = cfg.CUDNN.DETERMINISTIC
     torch.backends.cudnn.enabled = cfg.CUDNN.ENABLED
 
+    # 根据配置文件构建网络
+    print('models.'+cfg.MODEL.NAME+'.get_pose_net')
     model = eval('models.'+cfg.MODEL.NAME+'.get_pose_net')(
         cfg, is_train=True
     )
 
-    # copy model file
+    # copy model file,拷贝lib/models/pose_hrnet.py文件到输出目录之中
     this_dir = os.path.dirname(__file__)
+    print(os.path.join(this_dir, '../lib/models', cfg.MODEL.NAME + '.py'))
     shutil.copy2(
         os.path.join(this_dir, '../lib/models', cfg.MODEL.NAME + '.py'),
         final_output_dir)
     # logger.info(pprint.pformat(model))
 
+    # 用于训练信息的图形化显示
     writer_dict = {
         'writer': SummaryWriter(log_dir=tb_log_dir),
         'train_global_steps': 0,
         'valid_global_steps': 0,
     }
 
+    # 用于模型的图形化显示
     dump_input = torch.rand(
         (1, 3, cfg.MODEL.IMAGE_SIZE[1], cfg.MODEL.IMAGE_SIZE[0])
     )
-    writer_dict['writer'].add_graph(model, (dump_input, ))
+    #writer_dict['writer'].add_graph(model, (dump_input, ))
 
     logger.info(get_model_summary(model, dump_input))
 
+
+
+    # 让模型支持多GPU训练
     model = torch.nn.DataParallel(model, device_ids=cfg.GPUS).cuda()
 
-    # define loss function (criterion) and optimizer
+
+    # define loss function (criterion) and optimizer,用于计算loss
     criterion = JointsMSELoss(
         use_target_weight=cfg.LOSS.USE_TARGET_WEIGHT
     ).cuda()
 
-    # Data loading code
+
+    # Data loading code,对输入图象数据进行正则化处理
     normalize = transforms.Normalize(
         mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]
     )
+
+    # 创建训练以及测试数据的迭代器
     train_dataset = eval('dataset.'+cfg.DATASET.DATASET)(
         cfg, cfg.DATASET.ROOT, cfg.DATASET.TRAIN_SET, True,
         transforms.Compose([
@@ -137,7 +171,6 @@ def main():
             normalize,
         ])
     )
-
     train_loader = torch.utils.data.DataLoader(
         train_dataset,
         batch_size=cfg.TRAIN.BATCH_SIZE_PER_GPU*len(cfg.GPUS),
@@ -153,7 +186,9 @@ def main():
         pin_memory=cfg.PIN_MEMORY
     )
 
-    best_perf = 0.0
+
+    # 模型加载以及优化策略的相关配置
+    best_perf = 0.0 #
     best_model = False
     last_epoch = -1
     optimizer = get_optimizer(cfg, model)
@@ -179,6 +214,7 @@ def main():
         last_epoch=last_epoch
     )
 
+    #循环迭代进行训练
     for epoch in range(begin_epoch, cfg.TRAIN.END_EPOCH):
         lr_scheduler.step()
 
@@ -221,3 +257,4 @@ def main():
 
 if __name__ == '__main__':
     main()
+
