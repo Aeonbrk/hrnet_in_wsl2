@@ -171,6 +171,8 @@ class HighResolutionModule(nn.Module):
         self.fuse_layers = self._make_fuse_layers()
         self.relu = nn.ReLU(True)
 
+
+
     def _check_branches(self, num_branches, blocks, num_blocks,
                         num_inchannels, num_channels):
 
@@ -271,8 +273,8 @@ class HighResolutionModule(nn.Module):
                 # 多种情况的讨论
                 # 1.当前分支信息传递到上一分支(沿论文图示scale方向)的下一层(沿论文图示depth方向),
                 # 进行上采样,分辨率加倍
-                #         先使用1x1卷积将j分支的通道数变得和i分支一致,进而跟着BN,
-                #    然后依据上采样因子将j分支分辨率上采样到和i分支分辨率相同,此处使用最近邻插值
+                # 先使用1x1卷积将j分支的通道数变得和i分支一致,进而跟着BN,
+                # 然后依据上采样因子将j分支分辨率上采样到和i分支分辨率相同,此处使用最近邻插值
                 if j > i:
                     fuse_layer.append(
                         nn.Sequential(
@@ -333,9 +335,8 @@ class HighResolutionModule(nn.Module):
                     fuse_layer.append(nn.Sequential(*conv3x3s))
             fuse_layers.append(nn.ModuleList(fuse_layer))
 
-#         最后返回的是一个存储了每个分支对应的融合模块的二维数组,比如说两个分支中，
-#    对于分支１，fuse_layers[0][0]=None,fuse_layers[0][1]=上采样的操作
-
+        # 最后返回的是一个存储了每个分支对应的融合模块的二维数组,比如说两个分支中，
+        # 对于分支１，fuse_layers[0][0]=None,fuse_layers[0][1]=上采样的操作
         return nn.ModuleList(fuse_layers)
 
     def get_num_inchannels(self):
@@ -388,7 +389,7 @@ class PoseHighResolutionNet(nn.Module):
         # 存储 cfg 文件中的配置信息
 
         super(PoseHighResolutionNet, self).__init__()
-        # 显示对PoseHighResolutionNet进行初始化（覆盖nn.Module的__init__()）
+        # 显式地对PoseHighResolutionNet进行初始化（覆盖nn.Module的__init__()）
         # super() lets you avoid referring to the base class explicitly,
         # which can be nice. But the main advantage comes with multiple inheritance, where all sorts of fun stuff can happen.
 
@@ -407,16 +408,25 @@ class PoseHighResolutionNet(nn.Module):
         # stage 2
         self.stage2_cfg = cfg['MODEL']['EXTRA']['STAGE2']
         num_channels = self.stage2_cfg['NUM_CHANNELS']
-        # [32,64]
+        # num_channels=[32,64],num_channels表示输出通道,最后的64是新建平行分支N2的输出通道数
+        
         block = blocks_dict[self.stage2_cfg['BLOCK']]
-        # BASIC
+        # 这里的block为Bottleneck,在论文中有提到,第一个stage到第二个stage变换时,使用Bottleneck
+        
         num_channels = [
             num_channels[i] * block.expansion for i in range(len(num_channels))
         ]
+        # block.expansion默认为1,num_channels表示输出通道[32,64]
+        
         self.transition1 = self._make_transition_layer([256], num_channels)
+        # 这里会生成新的平行分支N2网络,即N11-->N21,N22这个过程
+        # 同时会对输入的特征图x进行通道变换(如果输入输出通道数不一致)
+        
         self.stage2, pre_stage_channels = self._make_stage(
             self.stage2_cfg, num_channels)
-
+        # 对平行子网络进行加工,让其输出的y,可以当作下一个stage的输入x,
+        # 这里的pre_stage_channels为当前stage的输出通道数,也就是下一个stage的输入通道数
+        # 同时平行子网络信息交换模块,也包含再其中
 
         # stage3
         self.stage3_cfg = cfg['MODEL']['EXTRA']['STAGE3']
@@ -435,9 +445,11 @@ class PoseHighResolutionNet(nn.Module):
         # FUSE_METHOD: SUM
         
         num_channels = self.stage3_cfg['NUM_CHANNELS']
-        # [32,64,128]
+        # num_channels=[32,64,128],num_channels表示输出通道,最后的128是新建平行分支N3的输出通道数
+        
         block = blocks_dict[self.stage3_cfg['BLOCK']]
-        # BASIC
+        # 这里的block为BasicBlock,在论文中有提到,除了第一个stage到第二个stage变换时使用Bottleneck,其余的都是使用BasicBlock
+        
         num_channels = [
             num_channels[i] * block.expansion for i in range(len(num_channels))
         ]
@@ -572,7 +584,7 @@ class PoseHighResolutionNet(nn.Module):
         for i in range(1, blocks):
             layers.append(block(self.inplanes, planes))
 
-        return nn.Sequential(*layers)
+        return nn.Sequential(*layers) # 分解成一个一个的
 
     def _make_stage(self, layer_config, num_inchannels,
                     multi_scale_output=True):
@@ -582,7 +594,7 @@ class PoseHighResolutionNet(nn.Module):
             当stage=4时: num_inchannels=[32,64,128,256]   multi_scale_output=False
         """
 
-        # 当stage=2,3,4时,num_modules分别为：1,4,3
+        # 当stage=2,3,4时,num_modules分别为：1,4,3，这个数字就是每个stage连续叠加使用的次数
         # 表示HighResolutionModule（平行之网络交换信息模块）模块的数目
         num_modules = layer_config['NUM_MODULES']
 
@@ -617,13 +629,13 @@ class PoseHighResolutionNet(nn.Module):
             # 根据参数,添加HighResolutionModule
             modules.append(
                 HighResolutionModule(
-                    num_branches,
-                    block,
-                    num_blocks,
-                    num_inchannels,
-                    num_channels,
-                    fuse_method,
-                    reset_multi_scale_output
+                    num_branches, # 当前stage平行分支的数目
+                    block, # BasicBlock
+                    num_blocks, # BasicBlock或者BottleBlock的数目
+                    num_inchannels,# 输入通道数目
+                    num_channels, # 输出通道数
+                    fuse_method, # 通特征融合的方式
+                    reset_multi_scale_output # 是否使用多尺度方式输出
                 )
             )
 
@@ -633,7 +645,7 @@ class PoseHighResolutionNet(nn.Module):
         return nn.Sequential(*modules), num_inchannels
 
     def forward(self, x):
-        # 最初的数据特征提取基础部分
+         # 经过一系列的卷积, 获得初步特征图,总体过程为x[b,3,256,192]-->x[b,256,64,48]
         x = self.conv1(x)
         x = self.bn1(x)
         x = self.relu(x)
@@ -642,7 +654,12 @@ class PoseHighResolutionNet(nn.Module):
         x = self.relu(x)
         x = self.layer1(x)
 
-        # 开始stage2的时候，第一次特征融合，先使用transition层得到特征融合部分的输入特征，就是将原有的一个分支，变为两个分支
+        # 对应论文中的stage2
+        # 其中包含了创建分支的过程,即 N11-->N21,N22 这个过程
+        # N22的分辨率为N21的二分之一,总体过程为:
+        # channel翻倍,分辨率除二
+        # x[b,256,64,48] ---> y[b, 32, 64, 48]  因为通道数不一致,通过卷积进行通道数变换
+        #                     y[b, 64, 32, 24]  通过新建平行分支生成
         x_list = []
         for i in range(self.stage2_cfg['NUM_BRANCHES']):
             if self.transition1[i] is not None:
@@ -650,31 +667,62 @@ class PoseHighResolutionNet(nn.Module):
             else:
                 x_list.append(x)
 
-        # 输入transition层得到的特征，进行特征融合得到特征融合后的输出，输入给第二个transition层得到stage3的输入特征，后面就类推
+        # 总体过程如下(经过一些卷积操作,但是特征图的分辨率和通道数都没有改变)：
+        # x[b, 32, 64, 48] --->  y[b, 32, 64, 48]
+        # x[b, 64, 32, 24] --->  y[b, 64, 32, 24]
         y_list = self.stage2(x_list)
 
-        # stage3
+        
+        
+        # 对应论文中的stage3
+        # 其中包含了创建分支的过程,即 N22-->N32,N33 这个过程
+        # N33的分辨率为N32的二分之一,
+        # y[b, 32, 64, 48] ---> x[b, 32,  64, 48]   因为通道数一致,没有做任何操作
+        # y[b, 64, 32, 24] ---> x[b, 64,  32, 24]   因为通道数一致,没有做任何操作
+        #                       x[b, 128, 16, 12]   通过新建平行分支生成
         x_list = []
         for i in range(self.stage3_cfg['NUM_BRANCHES']):
             if self.transition2[i] is not None:
                 x_list.append(self.transition2[i](y_list[-1]))
             else:
                 x_list.append(y_list[i])
+                
+        # 总体过程如下(经过一些卷积操作,但是特征图的分辨率和通道数都没有改变)：
+        # x[b, 32, 64, 48] ---> x[b, 32,  64, 48]
+        # x[b, 32, 32, 24] ---> x[b, 32, 32, 24] 
+        # x[b, 64, 16, 12] ---> x[b, 64, 16, 12]
         y_list = self.stage3(x_list)
 
-        # stage4
+       
+       
+        # 对应论文中的stage4
+        # 其中包含了创建分支的过程,即 N33-->N43,N44 这个过程
+        # N44的分辨率为N43的二分之一
+        # y[b, 32,  64, 48] ---> x[b, 32,  64, 48]  因为通道数一致,没有做任何操作
+        # y[b, 64,  32, 24] ---> x[b, 64,  32, 24]  因为通道数一致,没有做任何操作
+        # y[b, 128, 16, 12] ---> x[b, 128, 16, 12]  因为通道数一致,没有做任何操作
+        #                        x[b, 256, 8,  6 ]  通过新建平行分支生成
         x_list = []
         for i in range(self.stage4_cfg['NUM_BRANCHES']):
             if self.transition3[i] is not None:
                 x_list.append(self.transition3[i](y_list[-1]))
             else:
                 x_list.append(y_list[i])
+                
+        # 进行多尺度特征融合
+        # x[b, 32,  64, 48] --->
+        # x[b, 64,  32, 24] --->
+        # x[b, 128, 16, 12] --->
+        # x[b, 256, 8,  6 ] --->   y[b, 32,  64, 48]
         y_list = self.stage4(x_list)
 
         # 这里只要stage４部分输出特征的第一个，视情况对 head 有不同的应用和处理方式，具体看论文描述
+        # y[b, 32, 64, 48] --> x[b, 17, 64, 48]
         x = self.final_layer(y_list[0])
 
         return x
+
+
 
     # 初始化权重 W
     def init_weights(self, pretrained=''):
