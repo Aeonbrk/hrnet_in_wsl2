@@ -118,7 +118,7 @@ class COCODataset(JointsDataset):
         self.upper_body_ids = (0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10)
         self.lower_body_ids = (11, 12, 13, 14, 15, 16)
 
-        # 分别定义每个关键点的权重 ---> 为什么需要定于权重???
+        # 分别定义每个关键点的权重 ---> 为什么需要定义权重???
         self.joints_weight = np.array(
             [
                 1., 1., 1., 1., 1., 1., 1., 1.2, 1.2,
